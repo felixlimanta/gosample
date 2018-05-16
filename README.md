@@ -1,4 +1,4 @@
-Sample Go app - Auto Pull Staging
+Sample Go app - Auto Pull Staging 2
 
 ## Getting started
 
