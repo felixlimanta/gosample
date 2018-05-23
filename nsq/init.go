@@ -36,7 +36,7 @@ func NewNSQModule() *NSQModule {
 
 	// contohnya: caranya ciptakan nsq consumer
 	nsqCfg := nsq.NewConfig()
-	q := createNewConsumer(nsqCfg, "random-topic", "test", handler)
+	q := createNewConsumer(nsqCfg, "nsq-training", "test", handler)
 	q.SetLogger(log.New(os.Stderr, "nsq:", log.Ltime), nsq.LogLevelError)
 	q.ConnectToNSQLookupd("nsqlookupd.local:4161")
 
