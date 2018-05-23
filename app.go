@@ -2,6 +2,8 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"reflect"
 	// "github.com/google/gops/agent"
 	"log"
 	"net/http"
@@ -32,9 +34,15 @@ func main() {
 	http.Handle("/metrics", promhttp.Handler())
 
 	http.HandleFunc("/hello", hwm.SayHelloWorld)
+	http.HandleFunc("/test", hwm.Test)
+
 	go logging.StatsLog()
+
+	httpMux := reflect.ValueOf(http.DefaultServeMux).Elem()
+	finList := httpMux.FieldByIndex([]int{1})
+	fmt.Println(finList)
 
 	tracer.Init(&tracer.Config{Port: 8700, Enabled: true})
 
-	log.Fatal(grace.Serve(":9000", nil))
+	log.Fatal(grace.Serve(":9001", nil))
 }

@@ -3,6 +3,7 @@ package hello
 import (
 	"context"
 	"expvar"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -57,5 +58,15 @@ func (hlm *HelloWorldModule) someSlowFuncWeWantToTrace(ctx context.Context, w ht
 	span, ctx := opentracing.StartSpanFromContext(ctx, "someSlowFuncWeWantToTrace")
 	defer span.Finish()
 
-	w.Write([]byte("Hello " + hlm.something))
+	w.Write([]byte("喜べ " + hlm.something))
+}
+
+// TRAINING
+func (hlm *HelloWorldModule) Test(w http.ResponseWriter, r *http.Request) {
+	name := r.FormValue("name")
+	if name == "" {
+		name = "少年"
+	}
+
+	w.Write([]byte(fmt.Sprintf("喜べ、%s！君のねがうぃやようやくかなう", name)))
 }
