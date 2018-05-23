@@ -3,8 +3,10 @@ package hello
 import (
 	"context"
 	"expvar"
+	"fmt"
 	"log"
 	"net/http"
+	"reflect"
 
 	"github.com/opentracing/opentracing-go"
 	"gopkg.in/tokopedia/logging.v1"
@@ -14,8 +16,19 @@ type ServerConfig struct {
 	Name string
 }
 
+type HGW5Config struct {
+	Saber     string
+	Archer    string
+	Lancer    string
+	Rider     string
+	Caster    string
+	Assassin  string
+	Berserker string
+}
+
 type Config struct {
 	Server ServerConfig
+	HGW5   HGW5Config
 }
 
 type HelloWorldModule struct {
@@ -57,5 +70,13 @@ func (hlm *HelloWorldModule) someSlowFuncWeWantToTrace(ctx context.Context, w ht
 	span, ctx := opentracing.StartSpanFromContext(ctx, "someSlowFuncWeWantToTrace")
 	defer span.Finish()
 
-	w.Write([]byte("Hello " + hlm.something))
+	w.Write([]byte("Server: " + hlm.cfg.Server.Name + "\n"))
+
+	s := reflect.ValueOf(&hlm.cfg.HGW5).Elem()
+	typeOfT := s.Type()
+	for i := 0; i < s.NumField(); i++ {
+		f := s.Field(i)
+		w.Write([]byte(fmt.Sprintf("%d: %s %s = %v\n", i,
+			typeOfT.Field(i).Name, f.Type(), f.Interface())))
+	}
 }
