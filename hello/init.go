@@ -57,7 +57,7 @@ func NewHelloWorldModule() *HelloWorldModule {
 		log.Fatalln("Failed to connect database. Error: ", err.Error())
 	}
 
-	renderingEngine := template.Must(template.ParseGlob("files/var/templates/*"))
+	renderingEngine := template.Must(template.ParseGlob("files/var/templates/index.html"))
 
 	// this message only shows up if app is run with -debug option, so its great for debugging
 	logging.Debug.Println("hello init called", cfg.Server.Name)
@@ -125,32 +125,60 @@ type User struct {
 	CreatedTime    string
 	UpdatedTimeRaw pq.NullTime `db:"update_time"`
 	UpdatedTime    string
-	// Calculation string `db:"-"`
 }
 
 func (hlm *HelloWorldModule) Render(w http.ResponseWriter, r *http.Request) {
 	visitorCount := 0
 	searchCount := 0
 
+	data := map[string]interface{}{
+		"users":        hlm.queryDatabase(r.FormValue("q")),
+		"visitorCount": visitorCount,
+		"searchCount":  searchCount,
+	}
+
+	err := hlm.render.Execute(w, data)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (hlm *HelloWorldModule) RenderBatch(w http.ResponseWriter, r *http.Request) {
+	visitorCount := 0
+	searchCount := 0
+
+	data := map[string]interface{}{
+		"users":        hlm.queryDatabase(r.FormValue("q")),
+		"visitorCount": visitorCount,
+		"searchCount":  searchCount,
+	}
+
+	err := hlm.render.ExecuteTemplate(w, "batch", data)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (hlm *HelloWorldModule) queryDatabase(name string) []User {
 	users := []User{}
 	query := ""
-	if r.FormValue("q") == "" {
+	if name == "" {
 		query = `
 			SELECT user_id, full_name, msisdn, user_email, birth_date,
 				COALESCE(EXTRACT(YEAR from AGE(birth_date)), 0) AS current_age,
 				create_time, update_time
 			FROM ws_user
 			ORDER BY full_name ASC
-			LIMIT 1000;`
+			LIMIT 10;`
 	} else {
 		query = `
 			SELECT user_id, full_name, msisdn, user_email, birth_date,
 				COALESCE(EXTRACT(YEAR from AGE(birth_date)), 0) AS current_age,
 				create_time, update_time
 			FROM ws_user
-			WHERE full_name ILIKE '` + r.FormValue("q") + `%'
+			WHERE full_name ILIKE '` + name + `%'
 			ORDER BY full_name ASC
-			LIMIT 1000;`
+			LIMIT 10;`
 	}
 
 	err := hlm.db.Select(&users, query)
@@ -174,14 +202,5 @@ func (hlm *HelloWorldModule) Render(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	data := map[string]interface{}{
-		"users":        users,
-		"visitorCount": visitorCount,
-		"searchCount":  searchCount,
-	}
-
-	err = hlm.render.ExecuteTemplate(w, "index.html", data)
-	if err != nil {
-		panic(err)
-	}
+	return users
 }
