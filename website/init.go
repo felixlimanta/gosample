@@ -9,6 +9,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/gomodule/redigo/redis"
 	"github.com/lib/pq"
 	"github.com/tokopedia/sqlt"
 	"gopkg.in/tokopedia/logging.v1"
@@ -23,17 +24,22 @@ type DatabaseConfig struct {
 	Connection string
 }
 
+type RedisConfig struct {
+	Connection string
+}
+
 type Config struct {
 	Server   ServerConfig
 	Database DatabaseConfig
+	Redis    RedisConfig
 }
 
 type WebsiteModule struct {
-	cfg       *Config
-	db        *sqlt.DB
-	render    *template.Template
-	something string
-	stats     *expvar.Int
+	cfg    *Config
+	db     *sqlt.DB
+	render *template.Template
+	redis  *redis.Pool
+	stats  *expvar.Int
 }
 
 func NewWebsiteModule() *WebsiteModule {
@@ -56,15 +62,25 @@ func NewWebsiteModule() *WebsiteModule {
 
 	renderingEngine := template.Must(template.ParseGlob("files/var/templates/index.html"))
 
+	redisPools := &redis.Pool{
+		Dial: func() (redis.Conn, error) {
+			conn, err := redis.Dial("tcp", cfg.Redis.Connection)
+			if err != nil {
+				return nil, err
+			}
+			return conn, err
+		},
+	}
+
 	// this message only shows up if app is run with -debug option, so its great for debugging
 	logging.Debug.Println("hello init called", cfg.Server.Name)
 
 	return &WebsiteModule{
-		cfg:       &cfg,
-		db:        db,
-		render:    renderingEngine,
-		something: "John Doe",
-		stats:     expvar.NewInt("rpsStats"),
+		cfg:    &cfg,
+		db:     db,
+		render: renderingEngine,
+		redis:  redisPools,
+		stats:  expvar.NewInt("rpsStats"),
 	}
 }
 
@@ -110,8 +126,20 @@ type User struct {
 }
 
 func (wm *WebsiteModule) Render(w http.ResponseWriter, r *http.Request) {
-	visitorCount := 0
-	searchCount := 0
+	err := wm.incrementRedisKey("visitor_count")
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+
+	visitorCount, err := wm.getRedisKey("visitor_count")
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+
+	searchCount, err := wm.getRedisKey("search_count")
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
 
 	data := map[string]interface{}{
 		"users":        wm.queryDatabase(r.FormValue("q")),
@@ -119,15 +147,22 @@ func (wm *WebsiteModule) Render(w http.ResponseWriter, r *http.Request) {
 		"searchCount":  searchCount,
 	}
 
-	err := wm.render.Execute(w, data)
+	err = wm.render.Execute(w, data)
 	if err != nil {
 		panic(err)
 	}
 }
 
 func (wm *WebsiteModule) RenderBatch(w http.ResponseWriter, r *http.Request) {
-	visitorCount := 0
-	searchCount := 0
+	visitorCount, err := wm.getRedisKey("visitor_count")
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+
+	searchCount, err := wm.getRedisKey("search_count")
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
 
 	data := map[string]interface{}{
 		"users":        wm.queryDatabase(r.FormValue("q")),
@@ -135,13 +170,18 @@ func (wm *WebsiteModule) RenderBatch(w http.ResponseWriter, r *http.Request) {
 		"searchCount":  searchCount,
 	}
 
-	err := wm.render.ExecuteTemplate(w, "batch", data)
+	err = wm.render.ExecuteTemplate(w, "batch", data)
 	if err != nil {
 		panic(err)
 	}
 }
 
 func (wm *WebsiteModule) queryDatabase(name string) []User {
+	err := wm.incrementRedisKey("search_count")
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+
 	users := []User{}
 	query := ""
 	if name == "" {
@@ -163,7 +203,7 @@ func (wm *WebsiteModule) queryDatabase(name string) []User {
 			LIMIT 10;`
 	}
 
-	err := wm.db.Select(&users, query)
+	err = wm.db.Select(&users, query)
 	if err != nil {
 		panic(err)
 	}
@@ -185,4 +225,24 @@ func (wm *WebsiteModule) queryDatabase(name string) []User {
 	}
 
 	return users
+}
+
+func (wm *WebsiteModule) incrementRedisKey(key string) error {
+	pool := wm.redis.Get()
+	_, err := pool.Do("INCR", key)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (wm *WebsiteModule) getRedisKey(key string) (int, error) {
+	pool := wm.redis.Get()
+	val, err := redis.Int(pool.Do("GET", key))
+	if err != nil {
+		return 0, err
+	}
+
+	return val, nil
 }
