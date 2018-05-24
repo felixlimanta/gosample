@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"text/template"
+	"time"
 
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"github.com/opentracing/opentracing-go"
 	"github.com/tokopedia/sqlt"
 	"gopkg.in/tokopedia/logging.v1"
@@ -31,6 +33,7 @@ type Config struct {
 type HelloWorldModule struct {
 	cfg       *Config
 	db        *sqlt.DB
+	render    *template.Template
 	something string
 	stats     *expvar.Int
 }
@@ -54,12 +57,15 @@ func NewHelloWorldModule() *HelloWorldModule {
 		log.Fatalln("Failed to connect database. Error: ", err.Error())
 	}
 
+	renderingEngine := template.Must(template.ParseGlob("files/var/templates/*"))
+
 	// this message only shows up if app is run with -debug option, so its great for debugging
 	logging.Debug.Println("hello init called", cfg.Server.Name)
 
 	return &HelloWorldModule{
 		cfg:       &cfg,
 		db:        db,
+		render:    renderingEngine,
 		something: "John Doe",
 		stats:     expvar.NewInt("rpsStats"),
 	}
@@ -85,12 +91,12 @@ type Table struct {
 	ColumnName    string        `json:"column_name" db:"column_name"`
 	DataType      string        `json:"data_type" db:"data_type"`
 	CharMaxLength sql.NullInt64 `json:"character_maximum_length" db:"character_maximum_length"`
-	IsNullable    bool          `json:"is_nullable" db:"is_nullable"`
+	IsNullable    string        `json:"is_nullable" db:"is_nullable"`
 }
 
 func (hlm *HelloWorldModule) GetTableDescription(w http.ResponseWriter, r *http.Request) {
 	test := []Table{}
-	query := `SELECT column_name, data_type, character_maximum_length
+	query := `SELECT column_name, data_type, character_maximum_length, is_nullable
 			  FROM INFORMATION_SCHEMA.COLUMNS
 			  WHERE table_name = 'ws_user';`
 	err := hlm.db.Select(&test, query)
@@ -104,4 +110,78 @@ func (hlm *HelloWorldModule) GetTableDescription(w http.ResponseWriter, r *http.
 	}
 
 	w.Write([]byte(result))
+}
+
+// Database lookup
+type User struct {
+	ID             int         `db:"user_id"`
+	Name           string      `db:"full_name"`
+	MSISDN         string      `db:"msisdn"`
+	Email          string      `db:"user_email"`
+	BirthTimeRaw   pq.NullTime `db:"birth_date"`
+	BirthDate      string
+	UserAge        int       `db:"current_age"`
+	CreatedTimeRaw time.Time `db:"create_time"`
+	CreatedTime    string
+	UpdatedTimeRaw pq.NullTime `db:"update_time"`
+	UpdatedTime    string
+	// Calculation string `db:"-"`
+}
+
+func (hlm *HelloWorldModule) Render(w http.ResponseWriter, r *http.Request) {
+	visitorCount := 0
+	searchCount := 0
+
+	users := []User{}
+	query := ""
+	if r.FormValue("q") == "" {
+		query = `
+			SELECT user_id, full_name, msisdn, user_email, birth_date,
+				COALESCE(EXTRACT(YEAR from AGE(birth_date)), 0) AS current_age,
+				create_time, update_time
+			FROM ws_user
+			ORDER BY full_name ASC
+			LIMIT 1000;`
+	} else {
+		query = `
+			SELECT user_id, full_name, msisdn, user_email, birth_date,
+				COALESCE(EXTRACT(YEAR from AGE(birth_date)), 0) AS current_age,
+				create_time, update_time
+			FROM ws_user
+			WHERE full_name ILIKE '` + r.FormValue("q") + `%'
+			ORDER BY full_name ASC
+			LIMIT 1000;`
+	}
+
+	err := hlm.db.Select(&users, query)
+	if err != nil {
+		panic(err)
+	}
+
+	for id := range users {
+		users[id].BirthDate = "-"
+		val, _ := users[id].BirthTimeRaw.Value()
+		if val != nil {
+			users[id].BirthDate = val.(time.Time).Format(time.ANSIC)
+		}
+
+		users[id].CreatedTime = users[id].CreatedTimeRaw.Format(time.ANSIC)
+
+		users[id].UpdatedTime = "-"
+		val, _ = users[id].UpdatedTimeRaw.Value()
+		if val != nil {
+			users[id].UpdatedTime = val.(time.Time).Format(time.ANSIC)
+		}
+	}
+
+	data := map[string]interface{}{
+		"users":        users,
+		"visitorCount": visitorCount,
+		"searchCount":  searchCount,
+	}
+
+	err = hlm.render.ExecuteTemplate(w, "index.html", data)
+	if err != nil {
+		panic(err)
+	}
 }

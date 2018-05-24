@@ -31,6 +31,7 @@ func main() {
 
 	http.Handle("/metrics", promhttp.Handler())
 
+	http.HandleFunc("/", hwm.Render)
 	http.HandleFunc("/hello", hwm.SayHelloWorld)
 	http.HandleFunc("/describe", hwm.GetTableDescription)
 	go logging.StatsLog()
