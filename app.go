@@ -6,9 +6,8 @@ import (
 	"log"
 	"net/http"
 
+	website "github.com/felixlimanta/gosample/website"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
-	"github.com/felixlimanta/gosample/hello"
 	"github.com/tokopedia/logging/tracer"
 	"gopkg.in/tokopedia/grace.v1"
 	"gopkg.in/tokopedia/logging.v1"
@@ -27,14 +26,13 @@ func main() {
 	// 	log.Fatal(err)
 	// }
 
-	hwm := hello.NewHelloWorldModule()
+	wm := website.NewWebsiteModule()
 
 	http.Handle("/metrics", promhttp.Handler())
 
-	http.HandleFunc("/", hwm.Render)
-	http.HandleFunc("/api/get", hwm.RenderBatch)
-	http.HandleFunc("/hello", hwm.SayHelloWorld)
-	http.HandleFunc("/describe", hwm.GetTableDescription)
+	http.HandleFunc("/", wm.Render)
+	http.HandleFunc("/api/get", wm.RenderBatch)
+	http.HandleFunc("/describe", wm.GetTableDescription)
 	go logging.StatsLog()
 
 	tracer.Init(&tracer.Config{Port: 8700, Enabled: true})

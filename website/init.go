@@ -1,7 +1,6 @@
 package hello
 
 import (
-	"context"
 	"database/sql"
 	"expvar"
 	"fmt"
@@ -11,7 +10,6 @@ import (
 	"time"
 
 	"github.com/lib/pq"
-	"github.com/opentracing/opentracing-go"
 	"github.com/tokopedia/sqlt"
 	"gopkg.in/tokopedia/logging.v1"
 )
@@ -30,7 +28,7 @@ type Config struct {
 	Database DatabaseConfig
 }
 
-type HelloWorldModule struct {
+type WebsiteModule struct {
 	cfg       *Config
 	db        *sqlt.DB
 	render    *template.Template
@@ -38,11 +36,10 @@ type HelloWorldModule struct {
 	stats     *expvar.Int
 }
 
-func NewHelloWorldModule() *HelloWorldModule {
-
+func NewWebsiteModule() *WebsiteModule {
 	var cfg Config
 
-	ok := logging.ReadModuleConfig(&cfg, "config", "hello") || logging.ReadModuleConfig(&cfg, "files/etc/gosample", "hello")
+	ok := logging.ReadModuleConfig(&cfg, "config", "website") || logging.ReadModuleConfig(&cfg, "files/etc/gosample", "website")
 	if !ok {
 		// when the app is run with -e switch, this message will automatically be redirected to the log file specified
 		log.Fatalln("failed to read config")
@@ -62,28 +59,13 @@ func NewHelloWorldModule() *HelloWorldModule {
 	// this message only shows up if app is run with -debug option, so its great for debugging
 	logging.Debug.Println("hello init called", cfg.Server.Name)
 
-	return &HelloWorldModule{
+	return &WebsiteModule{
 		cfg:       &cfg,
 		db:        db,
 		render:    renderingEngine,
 		something: "John Doe",
 		stats:     expvar.NewInt("rpsStats"),
 	}
-}
-
-func (hlm *HelloWorldModule) SayHelloWorld(w http.ResponseWriter, r *http.Request) {
-	span, ctx := opentracing.StartSpanFromContext(r.Context(), r.URL.Path)
-	defer span.Finish()
-
-	hlm.stats.Add(1)
-	hlm.someSlowFuncWeWantToTrace(ctx, w)
-}
-
-func (hlm *HelloWorldModule) someSlowFuncWeWantToTrace(ctx context.Context, w http.ResponseWriter) {
-	span, ctx := opentracing.StartSpanFromContext(ctx, "someSlowFuncWeWantToTrace")
-	defer span.Finish()
-
-	w.Write([]byte("Hello " + hlm.something))
 }
 
 // Table Description
@@ -94,17 +76,17 @@ type Table struct {
 	IsNullable    string        `json:"is_nullable" db:"is_nullable"`
 }
 
-func (hlm *HelloWorldModule) GetTableDescription(w http.ResponseWriter, r *http.Request) {
+func (wm *WebsiteModule) GetTableDescription(w http.ResponseWriter, r *http.Request) {
 	test := []Table{}
 	query := `SELECT column_name, data_type, character_maximum_length, is_nullable
 			  FROM INFORMATION_SCHEMA.COLUMNS
 			  WHERE table_name = 'ws_user';`
-	err := hlm.db.Select(&test, query)
+	err := wm.db.Select(&test, query)
 	if err != nil {
 		log.Println("Error Query Database. Error: ", err.Error())
 	}
 
-	result := "List:\n"
+	result := "Columns:\n"
 	for _, v := range test {
 		result += fmt.Sprintf("Column %s: %s(%d) (Nullable: %v)\n", v.ColumnName, v.DataType, v.CharMaxLength, v.IsNullable)
 	}
@@ -127,39 +109,39 @@ type User struct {
 	UpdatedTime    string
 }
 
-func (hlm *HelloWorldModule) Render(w http.ResponseWriter, r *http.Request) {
+func (wm *WebsiteModule) Render(w http.ResponseWriter, r *http.Request) {
 	visitorCount := 0
 	searchCount := 0
 
 	data := map[string]interface{}{
-		"users":        hlm.queryDatabase(r.FormValue("q")),
+		"users":        wm.queryDatabase(r.FormValue("q")),
 		"visitorCount": visitorCount,
 		"searchCount":  searchCount,
 	}
 
-	err := hlm.render.Execute(w, data)
+	err := wm.render.Execute(w, data)
 	if err != nil {
 		panic(err)
 	}
 }
 
-func (hlm *HelloWorldModule) RenderBatch(w http.ResponseWriter, r *http.Request) {
+func (wm *WebsiteModule) RenderBatch(w http.ResponseWriter, r *http.Request) {
 	visitorCount := 0
 	searchCount := 0
 
 	data := map[string]interface{}{
-		"users":        hlm.queryDatabase(r.FormValue("q")),
+		"users":        wm.queryDatabase(r.FormValue("q")),
 		"visitorCount": visitorCount,
 		"searchCount":  searchCount,
 	}
 
-	err := hlm.render.ExecuteTemplate(w, "batch", data)
+	err := wm.render.ExecuteTemplate(w, "batch", data)
 	if err != nil {
 		panic(err)
 	}
 }
 
-func (hlm *HelloWorldModule) queryDatabase(name string) []User {
+func (wm *WebsiteModule) queryDatabase(name string) []User {
 	users := []User{}
 	query := ""
 	if name == "" {
@@ -181,7 +163,7 @@ func (hlm *HelloWorldModule) queryDatabase(name string) []User {
 			LIMIT 10;`
 	}
 
-	err := hlm.db.Select(&users, query)
+	err := wm.db.Select(&users, query)
 	if err != nil {
 		panic(err)
 	}

@@ -43,7 +43,6 @@
     <script src="https://code.jquery.com/jquery-3.3.1.min.js"></script>
     <script type="text/javascript">
         $(document).ready(function () {
-            $("#batch").html("")
             $("#q").on("input", function () {
                 $.get("/api/get?q=" + this.value, function (data, status) {
                     $("#batch").html(data)
