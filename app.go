@@ -32,9 +32,10 @@ func main() {
 	http.Handle("/metrics", promhttp.Handler())
 
 	http.HandleFunc("/hello", hwm.SayHelloWorld)
+	http.HandleFunc("/describe", hwm.GetTableDescription)
 	go logging.StatsLog()
 
 	tracer.Init(&tracer.Config{Port: 8700, Enabled: true})
 
-	log.Fatal(grace.Serve(":9000", nil))
+	log.Fatal(grace.Serve(":9001", nil))
 }
