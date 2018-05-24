@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/felixlimanta/gosample/nsq"
 	website "github.com/felixlimanta/gosample/website"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/tokopedia/logging/tracer"
@@ -27,6 +28,7 @@ func main() {
 	// }
 
 	wm := website.NewWebsiteModule()
+	nsq.NewNSQModule()
 
 	http.Handle("/metrics", promhttp.Handler())
 

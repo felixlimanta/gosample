@@ -11,17 +11,19 @@
 
     <div id="batch">
         {{block "batch" .}}
-        <table>
+        <table id="ws-user">
             <tr>
-                <td>ID</td>
-                <td>Full Name</td>
-                <td>MSISDN</td>
-                <td>Email</td>
-                <td>Birth Date</td>
-                <td>Current Age</td>
-                <td>Time Created</td>
-                <td>Time Updated</td>
-            </tr>] {{ range $index, $user := .users }}
+                <th>ID</th>
+                <th>Full Name</th>
+                <th>MSISDN</th>
+                <th>Email</th>
+                <th>Birth Date</th>
+                <th>Current Age</th>
+                <th>Time Created</th>
+                <th>Time Updated</th>
+            </tr>
+
+            {{ range $index, $user := .users }}
             <tr>
                 <td>{{ $user.ID }}</td>
                 <td>{{ $user.Name }}</td>

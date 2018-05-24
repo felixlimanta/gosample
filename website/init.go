@@ -1,7 +1,8 @@
-package hello
+package website
 
 import (
 	"database/sql"
+	"encoding/json"
 	"expvar"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/gomodule/redigo/redis"
 	"github.com/lib/pq"
+	nsq "github.com/nsqio/go-nsq"
 	"github.com/tokopedia/sqlt"
 	"gopkg.in/tokopedia/logging.v1"
 )
@@ -28,10 +30,16 @@ type RedisConfig struct {
 	Connection string
 }
 
+type NSQConfig struct {
+	NSQD     string
+	Lookupds string
+}
+
 type Config struct {
 	Server   ServerConfig
 	Database DatabaseConfig
 	Redis    RedisConfig
+	NSQ      NSQConfig
 }
 
 type WebsiteModule struct {
@@ -39,6 +47,7 @@ type WebsiteModule struct {
 	db     *sqlt.DB
 	render *template.Template
 	redis  *redis.Pool
+	nsq    *nsq.Producer
 	stats  *expvar.Int
 }
 
@@ -72,6 +81,11 @@ func NewWebsiteModule() *WebsiteModule {
 		},
 	}
 
+	nsqProducer, err := nsq.NewProducer(cfg.NSQ.NSQD, nsq.NewConfig())
+	if err != nil {
+		log.Fatalln("Failed to create new producer: ", err.Error())
+	}
+
 	// this message only shows up if app is run with -debug option, so its great for debugging
 	logging.Debug.Println("hello init called", cfg.Server.Name)
 
@@ -80,6 +94,7 @@ func NewWebsiteModule() *WebsiteModule {
 		db:     db,
 		render: renderingEngine,
 		redis:  redisPools,
+		nsq:    nsqProducer,
 		stats:  expvar.NewInt("rpsStats"),
 	}
 }
@@ -112,21 +127,29 @@ func (wm *WebsiteModule) GetTableDescription(w http.ResponseWriter, r *http.Requ
 
 // Database lookup
 type User struct {
+	ID          int
+	Name        string
+	MSISDN      string
+	Email       string
+	BirthDate   string
+	UserAge     int
+	CreatedTime string
+	UpdatedTime string
+}
+
+type User_DB struct {
 	ID             int         `db:"user_id"`
 	Name           string      `db:"full_name"`
 	MSISDN         string      `db:"msisdn"`
 	Email          string      `db:"user_email"`
 	BirthTimeRaw   pq.NullTime `db:"birth_date"`
-	BirthDate      string
-	UserAge        int       `db:"current_age"`
-	CreatedTimeRaw time.Time `db:"create_time"`
-	CreatedTime    string
+	UserAge        int         `db:"current_age"`
+	CreatedTimeRaw time.Time   `db:"create_time"`
 	UpdatedTimeRaw pq.NullTime `db:"update_time"`
-	UpdatedTime    string
 }
 
 func (wm *WebsiteModule) Render(w http.ResponseWriter, r *http.Request) {
-	err := wm.incrementRedisKey("visitor_count")
+	err := wm.nsqPublishIncrementRedisKey("visitor_count")
 	if err != nil {
 		log.Fatalln(err.Error())
 	}
@@ -170,19 +193,17 @@ func (wm *WebsiteModule) RenderBatch(w http.ResponseWriter, r *http.Request) {
 		"searchCount":  searchCount,
 	}
 
-	err = wm.render.ExecuteTemplate(w, "batch", data)
-	if err != nil {
-		panic(err)
-	}
+	res, _ := json.Marshal(data)
+	w.Write([]byte(res))
 }
 
 func (wm *WebsiteModule) queryDatabase(name string) []User {
-	err := wm.incrementRedisKey("search_count")
+	err := wm.nsqPublishIncrementRedisKey("search_count")
 	if err != nil {
 		log.Fatalln(err.Error())
 	}
 
-	users := []User{}
+	users_db := []User_DB{}
 	query := ""
 	if name == "" {
 		query = `
@@ -203,22 +224,30 @@ func (wm *WebsiteModule) queryDatabase(name string) []User {
 			LIMIT 10;`
 	}
 
-	err = wm.db.Select(&users, query)
+	err = wm.db.Select(&users_db, query)
 	if err != nil {
 		panic(err)
 	}
 
-	for id := range users {
+	users := make([]User, len(users_db))
+	for id := range users_db {
+		users[id].ID = users_db[id].ID
+		users[id].Name = users_db[id].Name
+		users[id].MSISDN = users_db[id].MSISDN
+		users[id].Email = users_db[id].Email
+
 		users[id].BirthDate = "-"
-		val, _ := users[id].BirthTimeRaw.Value()
+		val, _ := users_db[id].BirthTimeRaw.Value()
 		if val != nil {
 			users[id].BirthDate = val.(time.Time).Format(time.ANSIC)
 		}
 
-		users[id].CreatedTime = users[id].CreatedTimeRaw.Format(time.ANSIC)
+		users[id].UserAge = users_db[id].UserAge
+
+		users[id].CreatedTime = users_db[id].CreatedTimeRaw.Format(time.ANSIC)
 
 		users[id].UpdatedTime = "-"
-		val, _ = users[id].UpdatedTimeRaw.Value()
+		val, _ = users_db[id].UpdatedTimeRaw.Value()
 		if val != nil {
 			users[id].UpdatedTime = val.(time.Time).Format(time.ANSIC)
 		}
@@ -227,9 +256,8 @@ func (wm *WebsiteModule) queryDatabase(name string) []User {
 	return users
 }
 
-func (wm *WebsiteModule) incrementRedisKey(key string) error {
-	pool := wm.redis.Get()
-	_, err := pool.Do("INCR", key)
+func (wm *WebsiteModule) nsqPublishIncrementRedisKey(key string) error {
+	err := wm.nsq.Publish("omae-wa-mou-shindeiru", []byte(key))
 	if err != nil {
 		return err
 	}
